@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Beyond Slides — Audiencia</title>
+<style>
+  :root { --bg:#0f1117; --card:#1a1d27; --text:#f1f3f8; --muted:#8b93a7; --accent:#4f9dff; --hit:#ffd84a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:20px 16px 32px; min-height:100%; display:flex; flex-direction:column; }
+  header { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--muted); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#e5484d; margin-right:6px; }
+  .dot.on { background:#3ecf8e; }
+  h1 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:28px 0 6px; font-weight:600; }
+  h2 { font-size:26px; line-height:1.2; margin:0 0 6px; }
+  p.hint { color:var(--muted); margin:0 0 20px; font-size:15px; }
+  #buttons { display:grid; gap:12px; }
+  button.ping { position:relative; width:100%; padding:20px 64px 20px 18px; font-size:19px; font-weight:600; text-align:left;
+    color:var(--text); background:var(--card); border:2px solid #2a2f3d; border-radius:16px; cursor:pointer;
+    transition:transform .08s, border-color .25s, background .25s; }
+  button.ping:active { transform:scale(.97); }
+  button.ping.sent { border-color:var(--hit); background:#2a2714; }
+  button.ping .count { position:absolute; right:16px; top:50%; transform:translateY(-50%); min-width:38px; padding:4px 10px;
+    border-radius:999px; background:#2a2f3d; color:var(--hit); font-size:16px; text-align:center; }
+  .center { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; gap:10px; }
+  .big { font-size:54px; }
+  footer { margin-top:auto; padding-top:24px; font-size:12px; color:var(--muted); text-align:center; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span><span id="dot" class="dot"></span><span id="status">Conectando…</span></span>
+    <span id="people"></span>
+  </header>
+
+  <section id="live" hidden>
+    <h1>Ahora en la presentación</h1>
+    <h2 id="title"></h2>
+    <p class="hint">Toca un botón para reaccionar. El presentador lo ve y lo siente en tiempo real.</p>
+    <div id="buttons"></div>
+  </section>
+
+  <section id="waiting" class="center">
+    <div class="big">⏳</div>
+    <h2>Esperando al presentador</h2>
+    <p class="hint">La presentación empezará en un momento.</p>
+  </section>
+
+  <section id="ended" class="center" hidden>
+    <div class="big">👏</div>
+    <h2>¡Gracias por participar!</h2>
+    <p class="hint">La presentación ha terminado.</p>
+  </section>
+
+  <footer>Beyond Slides · IEEE VR 2026 3DUI Contest</footer>
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var ws = null, counts = {}, lastKey = '';
+
+  function show(id) {
+    ['live', 'waiting', 'ended'].forEach(function (s) { $(s).hidden = (s !== id); });
+  }
+
+  function setOnline(on) {
+    $('dot').className = 'dot' + (on ? ' on' : '');
+    $('status').textContent = on ? 'Conectado' : 'Reconectando…';
+  }
+
+  function render(state) {
+    if (state.ended) { show('ended'); return; }
+    var targets = state.targets || [], labels = state.labels || [];
+    if (!targets.length) { show('waiting'); lastKey = ''; return; }
+
+    show('live');
+    $('title').textContent = state.title || '';
+    var key = targets.join('|');
+    if (key === lastKey) { updateCounts(); return; }  // misma estación: no se redibuja
+    lastKey = key;
+
+    var box = $('buttons');
+    box.innerHTML = '';
+    targets.forEach(function (id, i) {
+      var b = document.createElement('button');
+      b.className = 'ping';
+      b.dataset.id = id;
+      b.appendChild(document.createTextNode(labels[i] || id));
+      var c = document.createElement('span');
+      c.className = 'count';
+      b.appendChild(c);
+      b.addEventListener('click', function () { ping(id, b); });
+      box.appendChild(b);
+    });
+    updateCounts();
+  }
+
+  function updateCounts() {
+    var buttons = document.querySelectorAll('button.ping');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].querySelector('.count').textContent = counts[buttons[i].dataset.id] || 0;
+    }
+  }
+
+  function ping(id, button) {
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: 'ping', target: id }));
+    if (navigator.vibrate) navigator.vibrate(30);      // el asistente también lo "siente"
+    button.classList.add('sent');
+    setTimeout(function () { button.classList.remove('sent'); }, 350);
+  }
+
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    ws = new WebSocket(proto + location.host);
+    ws.onopen = function () { setOnline(true); };
+    ws.onclose = function () { setOnline(false); setTimeout(connect, 1500); };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} };
+    ws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.type === 'state') {
+        counts = msg.counts || {};
+        if (msg.clients) $('people').textContent = msg.clients + ' en línea';
+        render(msg);
+      } else if (msg.type === 'count') {
+        counts[msg.target] = msg.count;
+        updateCounts();
+      } else if (msg.type === 'end') {
+        show('ended');
+      }
+    };
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

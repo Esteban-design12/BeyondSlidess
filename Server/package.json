@@ -1,0 +1,12 @@
+{
+  "name": "beyond-slides-server",
+  "version": "1.0.0",
+  "description": "Puente WebSocket entre Unity (presentador) y la web de la audiencia",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
